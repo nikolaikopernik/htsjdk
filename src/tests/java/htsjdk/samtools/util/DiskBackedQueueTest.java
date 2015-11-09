@@ -30,9 +30,6 @@ import org.testng.annotations.Test;
 
 import java.util.Collections;
 
-/**
- * Created by bradt on 4/28/14.
- */
 public class DiskBackedQueueTest extends SortingCollectionTest {
     @DataProvider(name = "diskBackedQueueProvider")
     public Object[][] createDBQTestData() {
@@ -90,7 +87,7 @@ public class DiskBackedQueueTest extends SortingCollectionTest {
 
     @Test
     public void testReadOnlyQueueJustBeforeReadingFromDisk() {
-        DiskBackedQueue<String> queue = makeDiskBackedQueue(2);
+        final DiskBackedQueue<String> queue = makeDiskBackedQueue(2);
         queue.add("foo");
         queue.add("bar");
         queue.add("baz");
@@ -109,4 +106,20 @@ public class DiskBackedQueueTest extends SortingCollectionTest {
         Assert.assertTrue(queue.canAdd());
     }
 
+    /** See: https://github.com/broadinstitute/picard/issues/327 */
+    @Test(expectedExceptions = IllegalStateException.class)
+    public void testPathologyIssue327() {
+
+        final DiskBackedQueue<String> queue = makeDiskBackedQueue(2);
+
+        // testing a particular order of adding to the queue, setting the result state, and emitting.
+        queue.add("0");
+        queue.add("1");
+        queue.add("2"); // spills to disk
+        Assert.assertEquals(queue.poll(), "0"); // gets from ram, so now there is space in ram, but a record on disk
+        queue.add("3"); // adds, but we assumed we added all records before removing them
+        Assert.assertEquals(queue.poll(), "1");
+        Assert.assertEquals(queue.poll(), "2");
+        Assert.assertEquals(queue.poll(), "3");
+    }
 }
