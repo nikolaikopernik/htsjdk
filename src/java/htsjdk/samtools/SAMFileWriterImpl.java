@@ -171,9 +171,6 @@ public abstract class SAMFileWriterImpl implements SAMFileWriter
     public void addAlignment(final SAMRecord alignment)
     {
         if (sortOrder.equals(SAMFileHeader.SortOrder.unsorted)) {
-            if (!header.getGroupOrder().equals(SAMFileHeader.GroupOrder.none)) {
-                throw new UnsupportedOperationException("GroupOrder " + header.getGroupOrder() + " is not supported");
-            }
             writeAlignment(alignment);
         } else if (presorted) {
             assertPresorted(alignment);
