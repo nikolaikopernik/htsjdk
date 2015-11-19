@@ -51,6 +51,8 @@ public class BlockCompressedOutputStream
         implements LocationAware
 {
     private static int defaultCompressionLevel = BlockCompressedStreamConstants.DEFAULT_COMPRESSION_LEVEL;
+    private volatile int nextIdxToWrite = 0;
+    private ParallelDeflateWorkerPool pool = new ParallelDeflateWorkerPool(this, Runtime.getRuntime().availableProcessors());
 
     /**
      * Sets the GZip compression level for subsequent BlockCompressedOutputStream object creation
@@ -207,6 +209,7 @@ public class BlockCompressedOutputStream
         while (numUncompressedBytes > 0) {
             deflateBlock();
         }
+        pool.flush();
         codec.getOutputStream().flush();
     }
 
@@ -218,6 +221,7 @@ public class BlockCompressedOutputStream
     @Override
     public void close() throws IOException {
         flush();
+        pool.close();
         // For debugging...
         // if (numberOfThrottleBacks > 0) {
         //     System.err.println("In BlockCompressedOutputStream, had to throttle back " + numberOfThrottleBacks +
@@ -269,48 +273,22 @@ public class BlockCompressedOutputStream
         if (numUncompressedBytes == 0) {
             return 0;
         }
-        final int bytesToCompress = numUncompressedBytes;
-        // Compress the input
-        deflater.reset();
-        deflater.setInput(uncompressedBuffer, 0, bytesToCompress);
-        deflater.finish();
-        int compressedSize = deflater.deflate(compressedBuffer, 0, compressedBuffer.length);
+        pool.deflateAsynchOnNextAvailable(uncompressedBuffer, numUncompressedBytes);
 
-        // If it didn't all fit in compressedBuffer.length, set compression level to NO_COMPRESSION
-        // and try again.  This should always fit.
-        if (!deflater.finished()) {
-            noCompressionDeflater.reset();
-            noCompressionDeflater.setInput(uncompressedBuffer, 0, bytesToCompress);
-            noCompressionDeflater.finish();
-            compressedSize = noCompressionDeflater.deflate(compressedBuffer, 0, compressedBuffer.length);
-            if (!noCompressionDeflater.finished()) {
-                throw new IllegalStateException("unpossible");
-            }
-        }
-        // Data compressed small enough, so write it out.
-        crc32.reset();
-        crc32.update(uncompressedBuffer, 0, bytesToCompress);
-
-        final int totalBlockSize = writeGzipBlock(compressedSize, bytesToCompress, crc32.getValue());
-        assert(bytesToCompress <= numUncompressedBytes);
-
-        // Clear out from uncompressedBuffer the data that was written
-        if (bytesToCompress == numUncompressedBytes) {
-            numUncompressedBytes = 0;
-        } else {
-            System.arraycopy(uncompressedBuffer, bytesToCompress, uncompressedBuffer, 0,
-                    numUncompressedBytes - bytesToCompress);
-            numUncompressedBytes -= bytesToCompress;
-        }
-        mBlockAddress += totalBlockSize;
-        return totalBlockSize;
+        numUncompressedBytes = 0;
+        return 0;
     }
 
     /**
      * Writes the entire gzip block, assuming the compressed data is stored in compressedBuffer
      * @return  size of gzip block that was written.
      */
-    private int writeGzipBlock(final int compressedSize, final int uncompressedSize, final long crc) {
+    protected synchronized int writeGzipBlock(final int idx, final byte[] compressedBuffer, final int compressedSize, final int uncompressedSize, final long crc) throws InterruptedException{
+        while(idx != nextIdxToWrite){
+//            System.out.println(idx+" try write before "+nextIdxToWrite);
+            this.wait(1000);
+        }
+
         // Init gzip header
         codec.writeByte(BlockCompressedStreamConstants.GZIP_ID1);
         codec.writeByte(BlockCompressedStreamConstants.GZIP_ID2);
@@ -331,6 +309,8 @@ public class BlockCompressedOutputStream
         codec.writeBytes(compressedBuffer, 0, compressedSize);
         codec.writeInt((int)crc);
         codec.writeInt(uncompressedSize);
+        nextIdxToWrite++;
+        this.notifyAll();
         return totalBlockSize;
     }
 }
