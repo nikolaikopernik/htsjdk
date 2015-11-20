@@ -52,46 +52,11 @@ public class BlockCompressedOutputStream
 {
     private static int defaultCompressionLevel = BlockCompressedStreamConstants.DEFAULT_COMPRESSION_LEVEL;
     private volatile int nextIdxToWrite = 0;
-    private ParallelDeflateWorkerPool pool = new ParallelDeflateWorkerPool(this, Runtime.getRuntime().availableProcessors());
-
-    /**
-     * Sets the GZip compression level for subsequent BlockCompressedOutputStream object creation
-     * that do not specify the compression level.
-     * @param compressionLevel 1 <= compressionLevel <= 9
-     */
-    public static void setDefaultCompressionLevel(final int compressionLevel) {
-        if (compressionLevel < Deflater.NO_COMPRESSION || compressionLevel > Deflater.BEST_COMPRESSION) {
-            throw new IllegalArgumentException("Invalid compression level: " + compressionLevel);
-        }
-        defaultCompressionLevel = compressionLevel;
-    }
-
-    public static int getDefaultCompressionLevel() {
-        return defaultCompressionLevel;
-    }
+    private ParallelDeflateWorkerPool pool;
 
     private final BinaryCodec codec;
     private final byte[] uncompressedBuffer = new byte[BlockCompressedStreamConstants.DEFAULT_UNCOMPRESSED_BLOCK_SIZE];
     private int numUncompressedBytes = 0;
-    private final byte[] compressedBuffer =
-            new byte[BlockCompressedStreamConstants.MAX_COMPRESSED_BLOCK_SIZE -
-                    BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH];
-    private final Deflater deflater;
-
-    // A second deflater is created for the very unlikely case where the regular deflation actually makes
-    // things bigger, and the compressed block is too big.  It should be possible to downshift the
-    // primary deflater to NO_COMPRESSION level, recompress, and then restore it to its original setting,
-    // but in practice that doesn't work.
-    // The motivation for deflating at NO_COMPRESSION level is that it will predictably produce compressed
-    // output that is 10 bytes larger than the input, and the threshold at which a block is generated is such that
-    // the size of tbe final gzip block will always be <= 64K.  This is preferred over the previous method,
-    // which would attempt to compress up to 64K bytes, and if the resulting compressed block was too large,
-    // try compressing fewer input bytes (aka "downshifting').  The problem with downshifting is that
-    // getFilePointer might return an inaccurate value.
-    // I assume (AW 29-Oct-2013) that there is no value in using hardware-assisted deflater for no-compression mode,
-    // so just use JDK standard.
-    private final Deflater noCompressionDeflater = new Deflater(Deflater.NO_COMPRESSION, true);
-    private final CRC32 crc32 = new CRC32();
     private File file = null;
     private long mBlockAddress = 0;
 
@@ -128,7 +93,7 @@ public class BlockCompressedOutputStream
     public BlockCompressedOutputStream(final File file, final int compressionLevel) {
         this.file = file;
         codec = new BinaryCodec(file, true);
-        deflater = DeflaterFactory.makeDeflater(compressionLevel, true);
+        pool =  new ParallelDeflateWorkerPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
     }
 
     /**
@@ -145,7 +110,7 @@ public class BlockCompressedOutputStream
         if (file != null) {
             codec.setOutputFileName(file.getAbsolutePath());
         }
-        deflater = DeflaterFactory.makeDeflater(compressionLevel, true);
+        pool =  new ParallelDeflateWorkerPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
     }
 
     /**
@@ -278,6 +243,23 @@ public class BlockCompressedOutputStream
         numUncompressedBytes = 0;
         return 0;
     }
+
+    /**
+     * Sets the GZip compression level for subsequent BlockCompressedOutputStream object creation
+     * that do not specify the compression level.
+     * @param compressionLevel 1 <= compressionLevel <= 9
+     */
+    public static void setDefaultCompressionLevel(final int compressionLevel) {
+        if (compressionLevel < Deflater.NO_COMPRESSION || compressionLevel > Deflater.BEST_COMPRESSION) {
+            throw new IllegalArgumentException("Invalid compression level: " + compressionLevel);
+        }
+        defaultCompressionLevel = compressionLevel;
+    }
+
+    public static int getDefaultCompressionLevel() {
+        return defaultCompressionLevel;
+    }
+
 
     /**
      * Writes the entire gzip block, assuming the compressed data is stored in compressedBuffer

@@ -1,12 +1,9 @@
 package htsjdk.samtools.util;
 
-import htsjdk.samtools.Defaults;
 import htsjdk.samtools.util.zip.DeflaterFactory;
 
 import java.util.BitSet;
 import java.util.Queue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Semaphore;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 
@@ -15,7 +12,20 @@ import java.util.zip.Deflater;
  */
 public class ParallelDeflateWorker extends Thread{
     private final Queue<ParallelDeflateWorker> pool;
-    private Deflater deflater = null;
+    private Deflater deflater;
+
+    // A second deflater is created for the very unlikely case where the regular deflation actually makes
+    // things bigger, and the compressed block is too big.  It should be possible to downshift the
+    // primary deflater to NO_COMPRESSION level, recompress, and then restore it to its original setting,
+    // but in practice that doesn't work.
+    // The motivation for deflating at NO_COMPRESSION level is that it will predictably produce compressed
+    // output that is 10 bytes larger than the input, and the threshold at which a block is generated is such that
+    // the size of tbe final gzip block will always be <= 64K.  This is preferred over the previous method,
+    // which would attempt to compress up to 64K bytes, and if the resulting compressed block was too large,
+    // try compressing fewer input bytes (aka "downshifting').  The problem with downshifting is that
+    // getFilePointer might return an inaccurate value.
+    // I assume (AW 29-Oct-2013) that there is no value in using hardware-assisted deflater for no-compression mode,
+    // so just use JDK standard.
     private Deflater noCompressionDeflater = null;
     private byte[] uncompressedBuffer =
             new byte[BlockCompressedStreamConstants.DEFAULT_UNCOMPRESSED_BLOCK_SIZE];
@@ -28,10 +38,13 @@ public class ParallelDeflateWorker extends Thread{
     private int idx;
     private BlockCompressedOutputStream stream;
 
-    public ParallelDeflateWorker(final Queue<ParallelDeflateWorker> pool, BlockCompressedOutputStream stream) {
+    public ParallelDeflateWorker(final Queue<ParallelDeflateWorker> pool, BlockCompressedOutputStream stream, final int compressionLevel) {
         this.pool = pool;
         this.stream = stream;
         working.set(0,false);
+
+        this.deflater = DeflaterFactory.makeDeflater(compressionLevel, true);
+        this.noCompressionDeflater = DeflaterFactory.makeDeflater(Deflater.NO_COMPRESSION, true);
     }
 
     @Override
@@ -83,11 +96,6 @@ public class ParallelDeflateWorker extends Thread{
     }
 
     public void deflateAsynch(int idx, final byte[] uncompressedBuffer, int numUncompressedBytes) {
-        if(this.deflater==null){
-            //init
-            this.deflater = DeflaterFactory.makeDeflater(Defaults.COMPRESSION_LEVEL, true);
-            this.noCompressionDeflater = DeflaterFactory.makeDeflater(Deflater.NO_COMPRESSION, true);
-        }
         this.idx = idx;
         this.numUncompressedBytes = numUncompressedBytes;
         System.arraycopy(uncompressedBuffer,0,this.uncompressedBuffer,0,numUncompressedBytes);

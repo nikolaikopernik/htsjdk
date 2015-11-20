@@ -15,10 +15,10 @@ public class ParallelDeflateWorkerPool {
     private int blockOrder = 0;
 
 
-    public ParallelDeflateWorkerPool(BlockCompressedOutputStream stream, final int processCount) {
+    public ParallelDeflateWorkerPool(BlockCompressedOutputStream stream, final int processCount, final int compressionLevel) {
         pool = new ArrayBlockingQueue<>(processCount);
         for(int i = 0;i<processCount;i++){
-            ParallelDeflateWorker e = new ParallelDeflateWorker(pool, stream);
+            ParallelDeflateWorker e = new ParallelDeflateWorker(pool, stream, compressionLevel);
             pool.add(e);
             array.add(e);
         }
