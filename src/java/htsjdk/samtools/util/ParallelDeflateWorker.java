@@ -1,5 +1,6 @@
 package htsjdk.samtools.util;
 
+import htsjdk.samtools.Defaults;
 import htsjdk.samtools.util.zip.DeflaterFactory;
 
 import java.util.BitSet;
@@ -84,7 +85,7 @@ public class ParallelDeflateWorker extends Thread{
     public void deflateAsynch(int idx, final byte[] uncompressedBuffer, int numUncompressedBytes) {
         if(this.deflater==null){
             //init
-            this.deflater = DeflaterFactory.makeDeflater(Deflater.DEFAULT_COMPRESSION, true);
+            this.deflater = DeflaterFactory.makeDeflater(Defaults.COMPRESSION_LEVEL, true);
             this.noCompressionDeflater = DeflaterFactory.makeDeflater(Deflater.NO_COMPRESSION, true);
         }
         this.idx = idx;
