@@ -184,6 +184,11 @@ public class BlockCompressedOutputStream
     public void write(final byte[] bytes, int startIndex, int numBytes) throws IOException {
         assert(numUncompressedBytes < uncompressedBuffer.length);
         while (numBytes > 0) {
+            assert(numBytes < uncompressedBuffer.length);
+            //This condition gives us a conviction that every block starts from a new read(aligment)
+            if(numUncompressedBytes + numBytes > uncompressedBuffer.length){
+                deflateBlock();
+            }
             final int bytesToWrite = Math.min(uncompressedBuffer.length - numUncompressedBytes, numBytes);
             System.arraycopy(bytes, startIndex, uncompressedBuffer, numUncompressedBytes, bytesToWrite);
             numUncompressedBytes += bytesToWrite;
