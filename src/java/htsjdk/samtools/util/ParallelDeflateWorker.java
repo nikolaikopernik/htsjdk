@@ -80,7 +80,6 @@ public class ParallelDeflateWorker extends Thread{
                         working.wait();
                     }
 
-
                     final int bytesToCompress = numUncompressedBytes;
                     // Compress the input
                     deflater.reset();
