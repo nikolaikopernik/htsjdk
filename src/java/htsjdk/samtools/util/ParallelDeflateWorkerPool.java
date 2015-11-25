@@ -1,7 +1,6 @@
 package htsjdk.samtools.util;
 
 import java.util.ArrayList;
-import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
@@ -12,10 +11,9 @@ import java.util.concurrent.BlockingQueue;
 public class ParallelDeflateWorkerPool {
     private BlockingQueue<ParallelDeflateWorker> pool;
     private ArrayList<ParallelDeflateWorker> array = new ArrayList<>(10);
-    private int blockOrder = 0;
 
 
-    public ParallelDeflateWorkerPool(BlockCompressedOutputStream stream, final int processCount, final int compressionLevel) {
+    public ParallelDeflateWorkerPool(ParallelBlockCompressedOutputStream stream, final int processCount, final int compressionLevel) {
         pool = new ArrayBlockingQueue<>(processCount);
         for(int i = 0;i<processCount;i++){
             ParallelDeflateWorker e = new ParallelDeflateWorker(pool, stream, compressionLevel);
@@ -25,9 +23,9 @@ public class ParallelDeflateWorkerPool {
     }
 
 
-    public void deflateAsynchOnNextAvailable(final byte[] uncompressedBuffer, int numUncompressedBytes) {
+    public void deflateAsynchOnNextAvailable(int idx, final byte[] uncompressedBuffer, int numUncompressedBytes) {
         try{
-            pool.take().deflateAsynch(blockOrder++, uncompressedBuffer, numUncompressedBytes);
+            pool.take().deflateAsynch(idx, uncompressedBuffer, numUncompressedBytes);
         }catch (InterruptedException e){
             e.printStackTrace();
         }

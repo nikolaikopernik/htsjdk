@@ -25,6 +25,7 @@ package htsjdk.samtools;
 
 import htsjdk.samtools.util.BinaryCodec;
 import htsjdk.samtools.util.BlockCompressedOutputStream;
+import htsjdk.samtools.util.ParallelBlockCompressedOutputStream;
 import htsjdk.samtools.util.RuntimeIOException;
 
 import java.io.DataOutputStream;
@@ -41,29 +42,29 @@ class BAMFileWriter extends SAMFileWriterImpl {
 
     private final BinaryCodec outputBinaryCodec;
     private BAMRecordCodec bamRecordCodec = null;
-    private final BlockCompressedOutputStream blockCompressedOutputStream;
+    private final ParallelBlockCompressedOutputStream blockCompressedOutputStream;
     private BAMIndexer bamIndexer = null;
 
     protected BAMFileWriter(final File path) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(path);
+        blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(path);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(path.getAbsolutePath());
     }
 
     protected BAMFileWriter(final File path, final int compressionLevel) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(path, compressionLevel);
+        blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(path, compressionLevel);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(path.getAbsolutePath());
     }
 
     protected BAMFileWriter(final OutputStream os, final File file) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(os, file);
+        blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(os, file);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(getPathString(file));
     }
 
     protected BAMFileWriter(final OutputStream os, final File file, final int compressionLevel) {
-        blockCompressedOutputStream = new BlockCompressedOutputStream(os, file, compressionLevel);
+        blockCompressedOutputStream = new ParallelBlockCompressedOutputStream(os, file, compressionLevel);
         outputBinaryCodec = new BinaryCodec(new DataOutputStream(blockCompressedOutputStream));
         outputBinaryCodec.setOutputFileName(getPathString(file));
     }
@@ -90,6 +91,7 @@ class BAMFileWriter extends SAMFileWriterImpl {
             throw new SAMException("Not creating BAM index since we don't have an output file name");
         }
         bamIndexer = createBamIndex(getFilename());
+        blockCompressedOutputStream.setIndexer(bamIndexer);
     }
 
     private BAMIndexer createBamIndex(final String path) {
@@ -102,7 +104,7 @@ class BAMFileWriter extends SAMFileWriterImpl {
                     throw new SAMException("Not creating BAM index since unable to write index file " + indexFile);
                 }
             }
-            return new BAMIndexer(indexFile, getFileHeader());
+            return new ParallelBAMIndexer(indexFile, getFileHeader());
         } catch (Exception e) {
             throw new SAMException("Not creating BAM index", e);
         }
