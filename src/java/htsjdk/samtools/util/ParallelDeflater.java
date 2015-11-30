@@ -26,16 +26,18 @@ package htsjdk.samtools.util;
 
 import htsjdk.samtools.util.zip.DeflaterFactory;
 
-import java.util.BitSet;
-import java.util.Queue;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 
 /**
- * Created by Nikolai_Bogdanov on 11/19/2015.
+ * Compress worker in separate thread.
+ *
+ * @author Nikolai_Bogdanov@epam.com
  */
-public class ParallelDeflateWorker extends Thread{
-    private final Queue<ParallelDeflateWorker> pool;
+public class ParallelDeflater extends Thread{
+    private final ParallelDeflatersPool pool;
     private Deflater deflater;
 
     // A second deflater is created for the very unlikely case where the regular deflation actually makes
@@ -56,16 +58,17 @@ public class ParallelDeflateWorker extends Thread{
     private byte[] compressedBuffer =
             new byte[BlockCompressedStreamConstants.MAX_COMPRESSED_BLOCK_SIZE -
                     BlockCompressedStreamConstants.BLOCK_HEADER_LENGTH];
-    private BitSet working = new BitSet(1);
+    private ReentrantLock lock = new ReentrantLock();
+    private Condition hasWork = lock.newCondition();
+
     private final CRC32 crc32 = new CRC32();
     private int numUncompressedBytes;
-    private int idx;
+    private int blockIDX;
     private ParallelBlockCompressedOutputStream stream;
 
-    public ParallelDeflateWorker(final Queue<ParallelDeflateWorker> pool, ParallelBlockCompressedOutputStream stream, final int compressionLevel) {
+    public ParallelDeflater(final ParallelDeflatersPool pool, ParallelBlockCompressedOutputStream stream, final int compressionLevel) {
         this.pool = pool;
         this.stream = stream;
-        working.set(0,false);
 
         this.deflater = DeflaterFactory.makeDeflater(compressionLevel, true);
         this.noCompressionDeflater = DeflaterFactory.makeDeflater(Deflater.NO_COMPRESSION, true);
@@ -74,75 +77,108 @@ public class ParallelDeflateWorker extends Thread{
     @Override
     public void run() {
         try {
-            while(!isInterrupted()) {
-                synchronized (working) {
-                    while (working.get(0) != true) {
-                        working.wait();
+            while (!isInterrupted()) {
+                waitNextBlock();
+
+                final int bytesToCompress = numUncompressedBytes;
+                // Compress the input
+                deflater.reset();
+                deflater.setInput(uncompressedBuffer, 0, bytesToCompress);
+                deflater.finish();
+                int compressedSize = deflater.deflate(compressedBuffer, 0, compressedBuffer.length);
+
+                // If it didn't all fit in compressedBuffer.length, set compression level to NO_COMPRESSION
+                // and try again.  This should always fit.
+                if (!deflater.finished()) {
+                    noCompressionDeflater.reset();
+                    noCompressionDeflater.setInput(uncompressedBuffer, 0, bytesToCompress);
+                    noCompressionDeflater.finish();
+                    compressedSize = noCompressionDeflater.deflate(compressedBuffer, 0, compressedBuffer.length);
+                    if (!noCompressionDeflater.finished()) {
+                        throw new IllegalStateException("unpossible");
                     }
-
-                    final int bytesToCompress = numUncompressedBytes;
-                    // Compress the input
-                    deflater.reset();
-                    deflater.setInput(uncompressedBuffer, 0, bytesToCompress);
-                    deflater.finish();
-                    int compressedSize = deflater.deflate(compressedBuffer, 0, compressedBuffer.length);
-
-                    // If it didn't all fit in compressedBuffer.length, set compression level to NO_COMPRESSION
-                    // and try again.  This should always fit.
-                    if (!deflater.finished()) {
-                        noCompressionDeflater.reset();
-                        noCompressionDeflater.setInput(uncompressedBuffer, 0, bytesToCompress);
-                        noCompressionDeflater.finish();
-                        compressedSize = noCompressionDeflater.deflate(compressedBuffer, 0, compressedBuffer.length);
-                        if (!noCompressionDeflater.finished()) {
-                            throw new IllegalStateException("unpossible");
-                        }
-                    }
-
-                    // Data compressed small enough, so write it out.
-                    crc32.reset();
-                    crc32.update(uncompressedBuffer, 0, bytesToCompress);
-
-                    stream.writeGzipBlockParallel(idx, compressedBuffer, compressedSize, bytesToCompress, crc32.getValue());
-
-
-                    working.set(0,false);
-                    working.notifyAll();
-                    pool.add(this);
                 }
 
-            }
-        } catch (InterruptedException e) {
-            working.set(0,false);
-        }
+                // Data compressed small enough, so write it out.
+                crc32.reset();
+                crc32.update(uncompressedBuffer, 0, bytesToCompress);
 
+                stream.writeGzipBlockSequential(blockIDX, compressedBuffer, compressedSize, bytesToCompress, crc32.getValue());
+                blockDone();
+            }
+
+        }catch (InterruptedException ie){
+            //just end run() as result
+        }
     }
 
-    public void deflateAsynch(int idx, final byte[] uncompressedBuffer, int numUncompressedBytes) {
-        this.idx = idx;
+    private void blockDone() {
+        lock.lock();
+        try {
+            blockIDX = -1;
+            pool.freeDeflator(this);
+            hasWork.signalAll();
+        }finally {
+            lock.unlock();
+        }
+    }
+
+    private void waitNextBlock() throws InterruptedException {
+        lock.lock();
+        try{
+            while (blockIDX == -1){
+                hasWork.await();
+            }
+        }finally {
+            lock.unlock();
+        }
+    }
+
+
+
+    /**
+     * New work for the deflater.
+     * 1. copy all input data
+     * 2. test if thread running
+     * 3. remove self from available deflaters
+     * Not thread-safe method.
+     *
+     * @param blockIDX
+     * @param uncompressedBuffer
+     * @param numUncompressedBytes
+     */
+    public void deflateAsync(int blockIDX, final byte[] uncompressedBuffer, int numUncompressedBytes) {
         this.numUncompressedBytes = numUncompressedBytes;
         System.arraycopy(uncompressedBuffer,0,this.uncompressedBuffer,0,numUncompressedBytes);
-        pool.remove(this);
+
+        newBlockToDeflate(blockIDX);
+    }
+
+    private void newBlockToDeflate(final int blockIDX) {
+        if(blockIDX == -1){
+            throw new IllegalStateException("Block index cannot be less then zero");
+        }
+        this.blockIDX = blockIDX;
+        pool.deflaterBusy(this);
         if(!isAlive()){
             start();
         }
-//        System.out.println("== start deflating "+idx+" block");
-        synchronized (working){
-            working.set(0, true);
-            working.notifyAll();
+        lock.lock();
+        try{
+            hasWork.signalAll();
+        }finally {
+            lock.unlock();
         }
-
     }
 
-    public void waitCurrentWork() {
+    public void waitCurrentWork() throws InterruptedException{
+        lock.lock();
         try {
-           synchronized (working){
-               while (working.get(0) == true){
-                   working.wait();
-               }
+           while(blockIDX != -1){
+                hasWork.await();
            }
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        }finally {
+            lock.unlock();
         }
     }
 }

@@ -1,3 +1,27 @@
+/*
+ * The MIT License
+ *
+ * Copyright (c) 2009 The Broad Institute
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 package htsjdk.samtools;
 
 import htsjdk.samtools.util.BlockCompressedFilePointerUtil;
@@ -10,6 +34,8 @@ import java.util.List;
 /**
  * Parallel indexer for asynchronous deflating BAM block ({@link htsjdk.samtools.util.ParallelBlockCompressedOutputStream})
  * Uses only in save indexes. To read index file use BAMIndexer
+ *
+ * @author Nikolai_Bogdanov@epam.com
  */
 public class ParallelBAMIndexer extends BAMIndexer {
     private List<SAMRecord> recordsInWait = new ArrayList<>(500);
@@ -40,17 +66,17 @@ public class ParallelBAMIndexer extends BAMIndexer {
     }
 
     /**
-     * Next block has been compressed and saved - so now we have it compressed address and can update all
+     * Next block has been compressed and saved - so now we have its compressed address and can update all
      * temporary indexes
-     * @param blockIDX
-     * @param blockAddress
+     * @param blockIDX block index
+     * @param blockAddress block address
      */
-    public synchronized void indexAllTempRecords(int blockIDX, long blockAddress){
+    public synchronized void updateAllTempRecords(int blockIDX, long blockAddress){
         List<SAMRecord> records = new ArrayList<>(500);
         synchronized (recordsInWait){
             for(Iterator<SAMRecord> i = recordsInWait.iterator();i.hasNext();){
                 SAMRecord record = i.next();
-                if(updateRecord(record, blockIDX, blockAddress)) {
+                if(updateRecord(record, blockIDX-1, blockAddress)) {
                     records.add(record);
                     i.remove();
                 }else {

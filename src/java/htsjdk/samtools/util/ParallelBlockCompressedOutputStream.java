@@ -41,22 +41,21 @@ import java.io.OutputStream;
  * saving) increased by 43% (but it depends on CPU count, HDD speed etc)
  *
  * @see AbstractCompressedOutputStream
- * @author Nikolai_Bogdanov
+ * @author Nikolai_Bogdanov@epam.com
  */
 public class ParallelBlockCompressedOutputStream
         extends AbstractCompressedOutputStream
 {
-    private volatile int nextIdxToWrite = 0;
-    private int currentBlockIdx = 0;
-    private ParallelDeflateWorkerPool pool;
-    private ParallelBAMIndexer indexer;
-
     /**
-     * Uses default compression level, which is 5 unless changed by setCompressionLevel
+     * All blocks must be written consistently, so every new deflates block has its own index from
+     * {@link #currentBlockIdx}, and it will be written separatly by its index only then
+     * {@link #nextBlockIdxToWrite} == block index.
      */
-    public ParallelBlockCompressedOutputStream(final String filename) {
-        this(filename, defaultCompressionLevel);
-    }
+    private int currentBlockIdx = 0;
+    private volatile int nextBlockIdxToWrite = 0;
+
+    private ParallelDeflatersPool pool;
+    private ParallelBAMIndexer indexer;
 
     /**
      * Uses default compression level, which is 5 unless changed by setCompressionLevel
@@ -69,17 +68,9 @@ public class ParallelBlockCompressedOutputStream
      * Prepare to compress at the given compression level
      * @param compressionLevel 1 <= compressionLevel <= 9
      */
-    public ParallelBlockCompressedOutputStream(final String filename, final int compressionLevel) {
-        this(new File(filename), compressionLevel);
-    }
-
-    /**
-     * Prepare to compress at the given compression level
-     * @param compressionLevel 1 <= compressionLevel <= 9
-     */
     public ParallelBlockCompressedOutputStream(final File file, final int compressionLevel) {
         super(file, compressionLevel);
-        pool =  new ParallelDeflateWorkerPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
+        pool =  new ParallelDeflatersPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
     }
 
     /**
@@ -92,7 +83,7 @@ public class ParallelBlockCompressedOutputStream
 
     public ParallelBlockCompressedOutputStream(final OutputStream os, final File file, final int compressionLevel) {
         super(os, file, compressionLevel);
-        pool =  new ParallelDeflateWorkerPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
+        pool =  new ParallelDeflatersPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
     }
 
     @Override
@@ -100,6 +91,7 @@ public class ParallelBlockCompressedOutputStream
         while (numUncompressedBytes > 0) {
             deflateBlock();
         }
+        // pool must be empty then flushing
         pool.flush();
         codec.getOutputStream().flush();
     }
@@ -128,9 +120,10 @@ public class ParallelBlockCompressedOutputStream
         }
     }
 
-    /** Encode virtual file pointer
-     * Upper 48 bits is the byte offset into the compressed stream of a block.
-     * Lower 16 bits is the byte offset into the uncompressed stream inside the block.
+    /**
+     * Override because new parallel indexing algorithm
+     * While block is compressing asynchronously it has pointer [blockIdx-1, uncompressedBytes]
+     * @see ParallelBAMIndexer
      */
     @Override
     public long getFilePointer(){
@@ -138,23 +131,24 @@ public class ParallelBlockCompressedOutputStream
     }
 
     /**
-     * Attempt to write the data in uncompressedBuffer to the underlying file in a gzip block.
-     * If the entire uncompressedBuffer does not fit in the maximum allowed size, reduce the amount
-     * of data to be compressed, and slide the excess down in uncompressedBuffer so it can be picked
-     * up in the next deflate event.
-     * @return size of gzip block that was written.
+     * Push deflate order to the first available deflater (wait, if the are no available).
+     * Copy {@link #uncompressedBuffer} to internal storage and release {@link #numUncompressedBytes}
      */
     @Override
     protected int deflateBlock() {
         if (numUncompressedBytes == 0) {
             return 0;
         }
-        pool.deflateAsynchOnNextAvailable(currentBlockIdx++, uncompressedBuffer, numUncompressedBytes);
-
+        pool.deflateAsyncOnNextAvailable(currentBlockIdx++, uncompressedBuffer, numUncompressedBytes);
         numUncompressedBytes = 0;
         return 0;
     }
 
+    /**
+     * With parallel compressing it's required to use ParallelBAMIndexer
+     * @see ParallelBAMIndexer
+     * @param indexer
+     */
     public void setIndexer(final BAMIndexer indexer) {
         if(!(indexer instanceof ParallelBAMIndexer)){
             throw new IllegalArgumentException("Use ParallelBAMIndexer with ParallelBlockCompressedOutputStream");
@@ -162,19 +156,21 @@ public class ParallelBlockCompressedOutputStream
         this.indexer = (ParallelBAMIndexer) indexer;
     }
 
-    protected synchronized void writeGzipBlockParallel(int idx, final byte[] compressedBuffer, final int compressedSize, final int uncompressedSize, final long crc) throws InterruptedException {
-        while(idx != nextIdxToWrite){
-//            System.out.println(idx+" try write before "+nextIdxToWrite);
+    /**
+     * Thread safe, sequential writing to the file.
+     * Next block will be written only if blockIDX argument equals {@link #nextBlockIdxToWrite}
+     * After write updating the index (if exist)
+     */
+    protected synchronized void writeGzipBlockSequential(int blockIDX, final byte[] compressedBuffer, final int compressedSize, final int uncompressedSize, final long crc) throws InterruptedException {
+        while(blockIDX != nextBlockIdxToWrite){
             this.wait();
         }
-
         mBlockAddress += super.writeGzipBlock(compressedBuffer, compressedSize, uncompressedSize, crc);
-
         if(indexer!=null){
-            indexer.indexAllTempRecords(nextIdxToWrite, mBlockAddress);
+            indexer.updateAllTempRecords(nextBlockIdxToWrite, mBlockAddress);
         }
-        nextIdxToWrite++;
-
+        nextBlockIdxToWrite++;
+        //nextBlockIdxToWrite increased, so maybe one of sleeping deflaters will accept to the next writing
         this.notifyAll();
     }
 }
