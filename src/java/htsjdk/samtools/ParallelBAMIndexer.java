@@ -39,6 +39,7 @@ import java.util.List;
  */
 public class ParallelBAMIndexer extends BAMIndexer {
     protected List<SAMRecord> recordsInWait = new ArrayList<>(500);
+    protected long lastProcessedBlockAddress = 0;
 
     public ParallelBAMIndexer(final File output, final SAMFileHeader fileHeader) {
         super(output, fileHeader);
@@ -75,7 +76,8 @@ public class ParallelBAMIndexer extends BAMIndexer {
         synchronized (recordsInWait){
             for(Iterator<SAMRecord> i = recordsInWait.iterator();i.hasNext();){
                 SAMRecord record = i.next();
-                if(updateRecord(record, blockIDX + 1, blockAddress)) {
+                if(updateRecord(record, blockIDX + 1, blockAddress) ||
+                        (blockIDX > 0 && updateRecord(record, blockIDX, lastProcessedBlockAddress))) {
                     records.add(record);
                     i.remove();
                 }else {
@@ -87,6 +89,7 @@ public class ParallelBAMIndexer extends BAMIndexer {
         for(SAMRecord record:records){
             processRecord(record);
         }
+        lastProcessedBlockAddress = blockAddress;
 
         if(!records.isEmpty()) {
             //notify some work finished (for correct finish() method)
