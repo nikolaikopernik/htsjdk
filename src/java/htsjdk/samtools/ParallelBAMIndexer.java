@@ -38,13 +38,11 @@ import java.util.List;
  * @author Nikolai_Bogdanov@epam.com
  */
 public class ParallelBAMIndexer extends BAMIndexer {
-    private List<SAMRecord> recordsInWait = new ArrayList<>(500);
+    protected List<SAMRecord> recordsInWait = new ArrayList<>(500);
 
     public ParallelBAMIndexer(final File output, final SAMFileHeader fileHeader) {
         super(output, fileHeader);
     }
-    public long prev = 0;
-    public long count = 0;
 
     @Override
     public void processAlignment(final SAMRecord rec) {
@@ -66,8 +64,9 @@ public class ParallelBAMIndexer extends BAMIndexer {
     }
 
     /**
-     * Next block has been compressed and saved - so now we have its compressed address and can update all
-     * temporary indexes
+     * Block with sequential number {@code blockIDX} has been processed to address = {@code blockAddress}
+     * So now we can update indexes for next block (index = {@code blockIDX} +1)
+     *
      * @param blockIDX block index
      * @param blockAddress block address
      */
@@ -76,7 +75,7 @@ public class ParallelBAMIndexer extends BAMIndexer {
         synchronized (recordsInWait){
             for(Iterator<SAMRecord> i = recordsInWait.iterator();i.hasNext();){
                 SAMRecord record = i.next();
-                if(updateRecord(record, blockIDX-1, blockAddress)) {
+                if(updateRecord(record, blockIDX + 1, blockAddress)) {
                     records.add(record);
                     i.remove();
                 }else {
@@ -86,7 +85,7 @@ public class ParallelBAMIndexer extends BAMIndexer {
         }
 
         for(SAMRecord record:records){
-            super.processAlignment(record);
+            processRecord(record);
         }
 
         if(!records.isEmpty()) {
@@ -95,6 +94,15 @@ public class ParallelBAMIndexer extends BAMIndexer {
                 recordsInWait.notifyAll();
             }
         }
+    }
+
+    /**
+     * For test overriding
+     * Add mockito to the project to disable that test methods!
+     * @param record
+     */
+    protected void processRecord(final SAMRecord record) {
+        super.processAlignment(record);
     }
 
     protected boolean updateRecord(SAMRecord record, int blockIdx, long blockAddress){
@@ -107,12 +115,14 @@ public class ParallelBAMIndexer extends BAMIndexer {
             return false;
         }
         for(Chunk c:chunks){
-            if(BlockCompressedFilePointerUtil.getBlockAddress(c.getChunkStart()) == blockIdx){
+            long blockStart = BlockCompressedFilePointerUtil.getBlockAddress(c.getChunkStart());
+            long blockEnd = BlockCompressedFilePointerUtil.getBlockAddress(c.getChunkEnd());
+            if(blockStart == blockIdx){
                 c.setChunkStart(BlockCompressedFilePointerUtil.makeFilePointer(blockAddress, BlockCompressedFilePointerUtil.getBlockOffset(c.getChunkStart())));
             }
-            if(BlockCompressedFilePointerUtil.getBlockAddress(c.getChunkEnd()) == blockIdx) {
+            if(blockEnd == blockIdx) {
                 c.setChunkEnd(BlockCompressedFilePointerUtil.makeFilePointer(blockAddress, BlockCompressedFilePointerUtil.getBlockOffset(c.getChunkEnd())));
-            }else {
+            }else if(blockEnd != 0){ //for the first block blockIdx == blockAddress == 0
                 return false;
             }
         }
