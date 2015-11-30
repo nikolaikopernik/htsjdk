@@ -76,7 +76,7 @@ public class ParallelBAMIndexer extends BAMIndexer {
         synchronized (recordsInWait){
             for(Iterator<SAMRecord> i = recordsInWait.iterator();i.hasNext();){
                 SAMRecord record = i.next();
-                if(updateRecord(record, blockIDX + 1, blockAddress) ||
+                if(updateRecord(record, blockIDX + 1, blockAddress) |
                         (blockIDX > 0 && updateRecord(record, blockIDX, lastProcessedBlockAddress))) {
                     records.add(record);
                     i.remove();
