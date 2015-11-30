@@ -95,7 +95,7 @@ public class ParallelDeflatersPool {
         pool.remove(deflater);
     }
 
-    protected void freeDeflator(ParallelDeflater deflater){
+    protected void freeDeflater(ParallelDeflater deflater){
         pool.add(deflater);
     }
 }

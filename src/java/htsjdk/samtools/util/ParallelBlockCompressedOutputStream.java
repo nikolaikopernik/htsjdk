@@ -51,8 +51,8 @@ public class ParallelBlockCompressedOutputStream
      * {@link #currentBlockIdx}, and it will be written separatly by its index only then
      * {@link #nextBlockIdxToWrite} == block index.
      */
-    private int currentBlockIdx = 0;
-    private volatile int nextBlockIdxToWrite = 0;
+    protected int currentBlockIdx = 0;
+    protected volatile int nextBlockIdxToWrite = 0;
 
     private ParallelDeflatersPool pool;
     private ParallelBAMIndexer indexer;
@@ -150,10 +150,12 @@ public class ParallelBlockCompressedOutputStream
      * @param indexer
      */
     public void setIndexer(final BAMIndexer indexer) {
-        if(!(indexer instanceof ParallelBAMIndexer)){
-            throw new IllegalArgumentException("Use ParallelBAMIndexer with ParallelBlockCompressedOutputStream");
+        if(indexer != null) {
+            if (!(indexer instanceof ParallelBAMIndexer)) {
+                throw new IllegalArgumentException("Use ParallelBAMIndexer with ParallelBlockCompressedOutputStream");
+            }
+            this.indexer = (ParallelBAMIndexer) indexer;
         }
-        this.indexer = (ParallelBAMIndexer) indexer;
     }
 
     /**

@@ -34,6 +34,8 @@ import static org.testng.Assert.*;
 
 /**
  * Unit test for parallel indexer
+ *
+ * @author Nikolai_Bogdanov@epam.com
  */
 public class ParallelBAMIndexerTest {
 
@@ -59,6 +61,7 @@ public class ParallelBAMIndexerTest {
         indexer.updateAllTempRecords(0, 18900);
         assertEquals(indexer.recordsInWait.size(), 0);
         assertEquals(recordWritted[0], 5);
+        indexer.finish();
     }
 
     @Test
@@ -92,6 +95,7 @@ public class ParallelBAMIndexerTest {
 
         indexer.updateAllTempRecords(3, 4444);
         assertEquals(recordExpect[0], 3);
+        indexer.finish();
     }
 
     @Test
@@ -125,6 +129,7 @@ public class ParallelBAMIndexerTest {
 
         indexer.updateAllTempRecords(3, 4444);
         assertEquals(recordExpect[0], 3);
+        indexer.finish();
     }
 
 
@@ -140,7 +145,6 @@ public class ParallelBAMIndexerTest {
         BAMFileSpan span = (BAMFileSpan) record.getFileSource().getFilePointer();
         List<Chunk> chunks = span.getChunks();
         for(Chunk c:chunks){
-            System.out.println(c);
             if(BlockCompressedFilePointerUtil.getBlockAddress(c.getChunkStart()) < fromBlockIdx ||
                     BlockCompressedFilePointerUtil.getBlockAddress(c.getChunkEnd()) > toBlockIdx) {
                 fail("SAMRecord " + c + " in out of test range [" + fromBlockIdx + ";" + toBlockIdx + "]");

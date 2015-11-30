@@ -116,7 +116,7 @@ public class ParallelDeflater extends Thread{
         lock.lock();
         try {
             blockIDX = -1;
-            pool.freeDeflator(this);
+            pool.freeDeflater(this);
             hasWork.signalAll();
         }finally {
             lock.unlock();
