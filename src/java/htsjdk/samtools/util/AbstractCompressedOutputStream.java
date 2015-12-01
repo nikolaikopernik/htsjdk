@@ -57,14 +57,14 @@ public abstract class AbstractCompressedOutputStream extends OutputStream implem
 
     /**
      * Prepare to compress at the given compression level
-     * @param compressionLevel 1 <= compressionLevel <= 9
+     * @param file file to output
      */
-    public AbstractCompressedOutputStream(final File file, final int compressionLevel) {
+    public AbstractCompressedOutputStream(final File file) {
         this.file = file;
         codec = new BinaryCodec(file, true);
     }
 
-    public AbstractCompressedOutputStream(final OutputStream os, final File file, final int compressionLevel) {
+    public AbstractCompressedOutputStream(final OutputStream os, final File file) {
         this.file = file;
         codec = new BinaryCodec(os);
         if (file != null) {

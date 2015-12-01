@@ -74,7 +74,7 @@ public class BlockCompressedOutputStream
     }
 
     public BlockCompressedOutputStream(final File file, final int compressionLevel) {
-        super(file, compressionLevel);
+        super(file);
         this.deflater = DeflaterFactory.makeDeflater(compressionLevel, true);
     }
 
@@ -83,7 +83,7 @@ public class BlockCompressedOutputStream
     }
 
     public BlockCompressedOutputStream(final OutputStream os, final File file, final int compressionLevel) {
-        super(os, file, compressionLevel);
+        super(os, file);
         this.deflater = DeflaterFactory.makeDeflater(compressionLevel, true);
     }
 

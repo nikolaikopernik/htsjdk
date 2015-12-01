@@ -69,7 +69,7 @@ public class ParallelBlockCompressedOutputStream
      * @param compressionLevel 1 <= compressionLevel <= 9
      */
     public ParallelBlockCompressedOutputStream(final File file, final int compressionLevel) {
-        super(file, compressionLevel);
+        super(file);
         pool =  new ParallelDeflatersPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
     }
 
@@ -82,7 +82,7 @@ public class ParallelBlockCompressedOutputStream
     }
 
     public ParallelBlockCompressedOutputStream(final OutputStream os, final File file, final int compressionLevel) {
-        super(os, file, compressionLevel);
+        super(os, file);
         pool =  new ParallelDeflatersPool(this, Runtime.getRuntime().availableProcessors(), compressionLevel);
     }
 
